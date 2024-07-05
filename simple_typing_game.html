@@ -1,0 +1,370 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="ja">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>simple typing game</title>
+    <script src="sound.js"></script>
+    <script src="keygraph.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f0f0;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+      }
+
+      .inner {
+        text-align: center;
+      }
+
+      .keys {
+        tab-size: 4;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        margin-top: 20px;
+      }
+
+      .none {
+        display: none;
+      }
+
+      #panel {
+        font-size: 20px;
+        min-width: 400px;
+        margin: 40px;
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+
+      .done {
+        background-color: rgba(128, 128, 128, 0.512);
+        color: white;
+        padding: 4px 0px 4px 8px;
+        border-radius: 3px;
+      }
+
+      #header {
+        font-size: small;
+        min-width: 94px;
+        margin: 10px;
+        background-color: #4caf50;
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+      }
+
+      #footer {
+        margin: 40px;
+        font-size: x-small;
+        display: none;
+      }
+
+      #footer a {
+        color: #4caf50;
+        text-decoration: none;
+      }
+
+      #footer a:hover {
+        text-decoration: underline;
+      }
+
+      #time {
+        font-size: large;
+        font-weight: bold;
+      }
+
+      #disp {
+        font-size: 24px;
+        margin-bottom: 20px;
+      }
+
+      #seq {
+        font-size: 24px;
+      }
+
+      #seq_done {
+        color: rgb(255, 255, 255);
+      }
+
+      #seq_candidates {
+        color: black;
+      }
+
+      #key_done {
+        color: rgb(255, 255, 255);
+      }
+
+      #key_candidate {
+        color: black;
+      }
+    </style>
+  </head>
+
+  <body class="outer">
+    <div id="header" class="inner">
+      <span id="time_panel">経過時間: <span id="time"></span></span>
+    </div>
+    <div id="panel" class="inner">
+      <div id="disp" class="instructions"></div>
+      <div id="seq" class="instructions">
+        <span id="seq_done" class="done"></span
+        ><span id="seq_candidates"></span>
+      </div>
+      <pre
+        id="keys"
+        class="keys"
+      ><span id="key_done" class="done"></span><span id="key_candidate"></span></pre>
+    </div>
+    <div id="footer" class="inner">
+      <span
+        >自分でタイピングゲームの文字を作れます<a
+          href="simple_typing_game_maker.html"
+          >⇒</a
+        ></span
+      >
+    </div>
+    <div id="score-display">
+      スコア: <span id="score">0</span> | WPM: <span id="wpm">0</span> | 正確性:
+      <span id="accuracy">100.00%</span>
+    </div>
+  </body>
+
+  <script>
+    // sound.jsの初期化
+    sound.init();
+
+    // タイプする文章
+    let dataset = [
+      { disp: "バロメーター髙田", str: "ばろめーたーたかだ" },
+      {
+        disp: "バカキモ男髙田",
+        str: "ばかきもおとこたかだ",
+      },
+      {
+        disp: "慶太郎不倫増田りん",
+        str: "けいたろうふりんますだりん",
+      },
+      {
+        disp: "この世のすべての女がセフレ",
+        str: "このよのすべてのおんながせふれ",
+      },
+      {
+        disp: "必死なの気もいな普通に",
+        str: "ひっしなのきもいなふつうに",
+      },
+    ];
+    if (location.search.length > 0) {
+      dataset = JSON.parse(decodeURI(location.search.match(/^\??(.*)/)[1])).map(
+        (e) => ({ disp: e[0], str: e[1] })
+      );
+    }
+
+    function shuffleArray(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    // スコア関連の変数
+    let totalChars = 0;
+    let correctChars = 0;
+    let startTime;
+
+    // タイプする文章の管理
+    const dataset_mgr = {
+      _cur_index: -1,
+      _is_finished: false,
+      reset: function () {
+        this._cur_index = -1;
+        this._is_finished = false;
+        totalChars = 0;
+        correctChars = 0;
+        startTime = Date.now();
+      },
+      next_string: function () {
+        this._cur_index += 1;
+        this._is_finished = this._cur_index === dataset.length;
+        if (this._is_finished) {
+          return undefined;
+        }
+        keygraph.build(dataset[this._cur_index].str);
+        return dataset[this._cur_index].disp ?? "";
+      },
+    };
+
+    // 残り時間を管理する lm の値を変更すると、初期の残り時間を変更できる。
+    let tm = {
+      // setIntervalのid
+      _id: undefined,
+      // タイピングの開始時間
+      _st: undefined,
+
+      // 経過時間の取得
+      tm: function () {
+        const t = Date.now();
+        return t - (this._st ?? t);
+      },
+      // 時間の文字変換
+      fm: function (t) {
+        return (Number(t) / 1000).toFixed(1);
+      },
+      // 時間管理の初期化
+      clear: function () {
+        clearInterval(this._id);
+        this._id = undefined;
+      },
+      // 時間管理の開始
+      start: function (cb) {
+        this._st = Date.now();
+        this._id = setInterval(() => {
+          cb(this);
+        }, 100);
+      },
+      // 時間管理がスタートしている場合に true が返る。
+      is_started: function () {
+        return this._id !== undefined;
+      },
+    };
+
+    let finalScore = { score: 0, wpm: 0, accuracy: 100 };
+
+    // スコアを計算して表示する関数
+    function updateScore() {
+      const currentTime = Date.now();
+      const elapsedTime = (currentTime - startTime) / 1000; // 秒単位
+      const wpm =
+        correctChars > 0
+          ? Math.round(correctChars / 5 / (elapsedTime / 60))
+          : 0; // 1単語を5文字とする
+      const accuracy = totalChars > 0 ? (correctChars / totalChars) * 100 : 100;
+      const score = Math.round(wpm * (accuracy / 100) * 10); // スコアの計算方法は調整可能
+
+      // 最終スコアを更新
+      finalScore = { score, wpm, accuracy };
+
+      document.getElementById("score").innerText = score;
+      document.getElementById("wpm").innerText = wpm;
+      document.getElementById("accuracy").innerText = `${accuracy.toFixed(2)}%`;
+    }
+
+    // 時間を表示
+    document.getElementById("time").innerText = tm.fm(tm.tm());
+    // 打ち終わった文字、これから打つ文字の例を表示する。
+    const disp = (seq) => {
+      document.getElementById("disp").innerText =
+        seq ?? document.getElementById("disp").innerText;
+      document.getElementById("key_done").innerText = keygraph.key_done() ?? "";
+      document.getElementById("key_candidate").innerText =
+        keygraph.key_candidate() ?? "";
+      document.getElementById("seq_done").innerText = keygraph.seq_done() ?? "";
+      document.getElementById("seq_candidates").innerText =
+        keygraph.seq_candidates() ?? "";
+    };
+
+    // キーが押されたときの処理
+    const keydown = (e) => {
+      // エスケープキーが押された場合、ゲームを強制中断
+      if (e.key === "Escape") {
+        updateScore(); // 最終スコアを更新
+        reset_game(
+          "ゲームを中断しました。\nスペースキーで再スタートします。",
+          true
+        );
+        return;
+      }
+
+      // タブキーの場合は、入力要素が他に移動しないようにデフォルト処理を抑制する。
+      if (e.key === "Tab") {
+        e.preventDefault();
+      }
+
+      totalChars++;
+      // 入力がタイピングするキーと一致している場合、
+      if (keygraph.next(e.key)) {
+        correctChars++;
+        // タイプ音を鳴らす。
+        sound.playCorrect();
+
+        // 現在のタイピング文字を表示する。
+        disp();
+      } else {
+        sound.playIncorrect();
+      }
+      updateScore();
+      // すべての文字をタイプし終わったとき、
+      if (keygraph.is_finished()) {
+        const seq = dataset_mgr.next_string();
+        if (seq === undefined) {
+          //   updateScore(); // 最終スコアを更新
+          reset_game(
+            "終わりです。お疲れ様です。\nスペースキーで再スタートします。",
+            true
+          );
+        } else {
+          disp(seq);
+          //   updateScore();
+        }
+      }
+    };
+
+    document.body.addEventListener("keydown", (e) => {
+      if (tm.is_started() === false) {
+        if (e.key === " ") {
+          tm.start((tm) => {
+            document.getElementById("time").innerText = tm.fm(tm.tm());
+          });
+          startTime = Date.now();
+          totalChars = 0;
+          correctChars = 0;
+          disp(dataset_mgr.next_string());
+        }
+      } else {
+        keydown(e);
+      }
+
+      // エスケープキーの処理をここにも追加
+      if (e.key === "Escape" && tm.is_started()) {
+        updateScore(); // 最終スコアを更新
+        reset_game("スペースキーでスタートします。", true);
+      }
+    });
+
+    // ゲームの初期化、msgは初期化後に画面に表示する文字
+    const reset_game = (msg, showFinalScore = false) => {
+      if (showFinalScore) {
+        // 最終スコアを表示
+        document.getElementById("score").innerText = finalScore.score;
+        document.getElementById("wpm").innerText = finalScore.wpm;
+        document.getElementById(
+          "accuracy"
+        ).innerText = `${finalScore.accuracy.toFixed(2)}%`;
+      } else {
+        // 初期値を表示
+        document.getElementById("score").innerText = "0";
+        document.getElementById("wpm").innerText = "0";
+        document.getElementById("accuracy").innerText = "100.00%";
+        finalScore = { score: 0, wpm: 0, accuracy: 100 };
+      }
+      document.getElementById("time").innerText = tm.fm(tm.tm());
+      keygraph.reset();
+      disp(msg);
+      tm.clear();
+      dataset_mgr.reset();
+    };
+    reset_game("スペースキーでスタートします。");
+  </script>
+</html>
